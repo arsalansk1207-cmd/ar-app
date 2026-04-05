@@ -232,6 +232,7 @@ input[type=text]:focus{border-color:rgba(0,240,160,0.5)}
 
 <div class="toast" id="toast"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 <script>
 let mappings = [];
 
@@ -250,7 +251,29 @@ function handleQRFile(input) {
   document.getElementById('qrPreviewName').textContent = f.name;
   document.getElementById('qrPreviewSize').textContent = fmtSize(f.size);
   document.getElementById('qrPreview').classList.add('show');
+  
+  // Auto-decode QR image
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imgData.data, imgData.width, imgData.height);
+      if (code && code.data) {
+        document.getElementById('qrtext').value = code.data;
+        toast('QR code decoded: ' + code.data, 'success');
+      }
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(f);
 }
+
 function handleVidFile(input) {
   const f = input.files[0]; if(!f) return;
   document.getElementById('vidPreviewName').textContent = f.name;
