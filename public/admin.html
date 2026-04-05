@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AR Scanner — Admin</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{--bg:#0d0d0f;--card:#17181c;--border:#2a2b30;--accent:#00f0a0;--accent2:#0055ff;--text:#f0f0f0;--muted:#666;--red:#ff4d4d;}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;min-height:100vh;}
+
+/* HEADER */
+header{padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:var(--bg);z-index:50;}
+.logo{display:flex;align-items:center;gap:10px;}
+.logo-icon{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;}
+.logo-icon svg{width:20px;height:20px;}
+.logo-name{font-size:17px;font-weight:700;}
+.logo-badge{font-size:11px;color:var(--muted);background:rgba(255,255,255,.06);padding:3px 8px;border-radius:99px;border:1px solid var(--border);}
+.scanner-link{text-decoration:none;padding:8px 16px;border-radius:99px;border:1px solid var(--border);color:var(--muted);font-size:13px;transition:border-color .2s,color .2s;}
+.scanner-link:hover{border-color:var(--accent);color:var(--accent);}
+
+/* LAYOUT */
+main{max-width:860px;margin:0 auto;padding:32px 20px;}
+.page-title{font-size:26px;font-weight:700;margin-bottom:6px;}
+.page-sub{font-size:14px;color:var(--muted);margin-bottom:32px;}
+
+/* ADD BUTTON */
+.add-btn{display:flex;align-items:center;gap:8px;padding:12px 20px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;color:#000;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:28px;transition:opacity .2s,transform .1s;}
+.add-btn:hover{opacity:.9;}
+.add-btn:active{transform:scale(.97);}
+.add-btn svg{width:18px;height:18px;fill:#000;}
+
+/* CARDS */
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;margin-bottom:16px;overflow:hidden;transition:border-color .2s;}
+.card:hover{border-color:#3a3b40;}
+.card-header{padding:18px 20px;display:flex;align-items:center;gap:14px;cursor:pointer;}
+.card-num{width:30px;height:30px;border-radius:8px;background:rgba(255,255,255,.05);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;color:var(--muted);flex-shrink:0;}
+.card-info{flex:1;min-width:0;}
+.card-title{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.card-status{display:flex;gap:8px;margin-top:4px;}
+.pill{font-size:11px;padding:2px 9px;border-radius:99px;font-weight:500;}
+.pill.ok{background:rgba(0,240,160,.12);color:var(--accent);border:1px solid rgba(0,240,160,.25);}
+.pill.no{background:rgba(255,255,255,.05);color:var(--muted);border:1px solid var(--border);}
+.pill.qr-ok{background:rgba(0,85,255,.12);color:#66aaff;border:1px solid rgba(0,85,255,.25);}
+.card-del{width:34px;height:34px;border-radius:8px;border:none;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s;}
+.card-del:hover{background:rgba(255,77,77,.1);}
+.card-del svg{width:16px;height:16px;fill:var(--muted);}
+.card-del:hover svg{fill:var(--red);}
+.chevron{width:18px;height:18px;fill:var(--muted);transition:transform .25s;flex-shrink:0;}
+.card.open .chevron{transform:rotate(180deg);}
+
+/* CARD BODY */
+.card-body{display:none;padding:0 20px 20px;border-top:1px solid var(--border);}
+.card.open .card-body{display:block;}
+.section{margin-top:18px;}
+.sec-label{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px;}
+.field-row{display:flex;gap:8px;}
+.field-input{flex:1;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--text);font-size:14px;outline:none;transition:border-color .2s;}
+.field-input:focus{border-color:var(--accent);}
+.field-input::placeholder{color:var(--muted);}
+.save-meta{padding:8px 16px;border-radius:10px;border:none;background:rgba(0,240,160,.12);color:var(--accent);font-size:13px;font-weight:600;cursor:pointer;transition:background .15s;}
+.save-meta:hover{background:rgba(0,240,160,.2);}
+
+/* UPLOAD ZONES */
+.upload-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px;}
+@media(max-width:520px){.upload-grid{grid-template-columns:1fr;}}
+.upload-zone{border:1.5px dashed var(--border);border-radius:12px;padding:20px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;position:relative;overflow:hidden;}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--accent);background:rgba(0,240,160,.04);}
+.upload-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+.uz-icon{width:36px;height:36px;border-radius:10px;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;}
+.uz-icon.qr-color{background:rgba(0,85,255,.15);}
+.uz-icon.vid-color{background:rgba(0,240,160,.12);}
+.uz-icon svg{width:18px;height:18px;}
+.uz-title{font-size:13px;font-weight:600;margin-bottom:3px;}
+.uz-sub{font-size:11px;color:var(--muted);}
+
+/* PREVIEW */
+.preview-wrap{margin-top:12px;border-radius:10px;overflow:hidden;border:1px solid var(--border);display:none;}
+.preview-wrap.visible{display:block;}
+.qr-preview{width:100%;aspect-ratio:1;object-fit:cover;display:block;}
+.vid-preview{width:100%;aspect-ratio:16/9;display:block;background:#000;}
+.preview-label{padding:8px 12px;font-size:11px;color:var(--muted);background:rgba(0,0,0,.3);display:flex;align-items:center;justify-content:space-between;}
+.replace-btn{font-size:11px;color:var(--accent);cursor:pointer;background:none;border:none;padding:0;}
+
+/* PROGRESS */
+.upbar-wrap{height:4px;background:rgba(255,255,255,.07);border-radius:99px;margin-top:8px;overflow:hidden;display:none;}
+.upbar-wrap.visible{display:block;}
+.upbar{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:99px;width:0%;transition:width .1s;}
+
+/* EMPTY */
+.empty{text-align:center;padding:60px 20px;color:var(--muted);}
+.empty svg{width:48px;height:48px;fill:var(--border);margin-bottom:16px;}
+.empty p{font-size:15px;}
+
+/* TOAST */
+.toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(20px);background:rgba(20,20,24,.95);border:1px solid var(--border);border-radius:12px;padding:12px 20px;font-size:14px;opacity:0;transition:all .3s;pointer-events:none;white-space:nowrap;z-index:999;backdrop-filter:blur(10px);}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+.toast.ok{border-color:rgba(0,240,160,.3);color:var(--accent);}
+.toast.err{border-color:rgba(255,77,77,.3);color:var(--red);}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon"><svg viewBox="0 0 24 24" fill="white"><rect x="2" y="2" width="8" height="8" rx="1.5"/><rect x="14" y="2" width="8" height="8" rx="1.5"/><rect x="2" y="14" width="8" height="8" rx="1.5"/><rect x="16" y="16" width="4" height="4" rx=".75"/><rect x="14" y="14" width="3" height="3" rx=".5" opacity=".45"/></svg></div>
+    <span class="logo-name">AR Scanner</span>
+    <span class="logo-badge">Admin</span>
+  </div>
+  <a href="/" class="scanner-link">← Open Scanner</a>
+</header>
+
+<main>
+  <div class="page-title">QR → Video Mappings</div>
+  <div class="page-sub">Upload a QR code image and its linked video. The scanner will auto-detect and play it.</div>
+
+  <button class="add-btn" onclick="createMapping()">
+    <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+    Add New Mapping
+  </button>
+
+  <div id="list"></div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let mappings = [];
+
+async function load() {
+  try {
+    const r = await fetch('/api/mappings');
+    mappings = await r.json();
+    render();
+  } catch(e) { toast('Failed to load mappings', 'err'); }
+}
+
+function render() {
+  const list = document.getElementById('list');
+  if (!mappings.length) {
+    list.innerHTML = `<div class="empty"><svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V6h16v12z"/></svg><p>No mappings yet. Add one above.</p></div>`;
+    return;
+  }
+  list.innerHTML = mappings.map((m, i) => `
+    <div class="card" id="card-${m.id}">
+      <div class="card-header" onclick="toggleCard('${m.id}')">
+        <div class="card-num">${i+1}</div>
+        <div class="card-info">
+          <div class="card-title">${m.title || 'Untitled'}</div>
+          <div class="card-status">
+            <span class="pill ${m.qrImage ? 'qr-ok' : 'no'}">${m.qrImage ? '✓ QR Image' : '○ No QR'}</span>
+            <span class="pill ${m.video ? 'ok' : 'no'}">${m.video ? '✓ Video' : '○ No Video'}</span>
+            <span class="pill ${m.qrContent ? 'ok' : 'no'}">${m.qrContent ? '✓ Content Set' : '○ No Content'}</span>
+          </div>
+        </div>
+        <button class="card-del" onclick="event.stopPropagation();deleteMapping('${m.id}')" title="Delete">
+          <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+        </button>
+        <svg class="chevron" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+      </div>
+      <div class="card-body">
+        <div class="section">
+          <div class="sec-label">Title & QR Content</div>
+          <div class="field-row">
+            <input class="field-input" id="title-${m.id}" placeholder="Display title" value="${m.title||''}" />
+            <input class="field-input" id="qrc-${m.id}" placeholder="QR code content (auto-detected or enter manually)" value="${m.qrContent||''}" />
+            <button class="save-meta" onclick="saveMeta('${m.id}')">Save</button>
+          </div>
+        </div>
+        <div class="section">
+          <div class="sec-label">Files</div>
+          <div class="upload-grid">
+            <div>
+              <div class="upload-zone" id="qrzone-${m.id}" ondragover="dragover(event,'${m.id}','qr')" ondragleave="dragleave('${m.id}','qr')" ondrop="drop(event,'${m.id}','qr')">
+                <input type="file" accept="image/*" onchange="uploadFile('${m.id}','qr',this.files[0])" />
+                <div class="uz-icon qr-color"><svg viewBox="0 0 24 24" fill="#66aaff"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="16.5" y="16.5" width="3.5" height="3.5" rx=".5"/><rect x="14" y="14" width="3" height="3" rx=".5" opacity=".4"/></svg></div>
+                <div class="uz-title">QR Code Image</div>
+                <div class="uz-sub">PNG, JPG — QR content auto-read</div>
+              </div>
+              <div class="upbar-wrap" id="qrbar-${m.id}"><div class="upbar" id="qrbarf-${m.id}"></div></div>
+              <div class="preview-wrap ${m.qrImage ? 'visible' : ''}" id="qrprev-${m.id}">
+                ${m.qrImage ? `<img class="qr-preview" src="${m.qrImage}" />` : ''}
+                <div class="preview-label"><span>QR Image</span><button class="replace-btn">Replace ↑</button></div>
+              </div>
+            </div>
+            <div>
+              <div class="upload-zone" id="vidzone-${m.id}" ondragover="dragover(event,'${m.id}','vid')" ondragleave="dragleave('${m.id}','vid')" ondrop="drop(event,'${m.id}','vid')">
+                <input type="file" accept="video/*" onchange="uploadFile('${m.id}','vid',this.files[0])" />
+                <div class="uz-icon vid-color"><svg viewBox="0 0 24 24" fill="#00f0a0"><path d="M8 5v14l11-7z"/></svg></div>
+                <div class="uz-title">Video File</div>
+                <div class="uz-sub">MP4, WebM — up to 500MB</div>
+              </div>
+              <div class="upbar-wrap" id="vidbar-${m.id}"><div class="upbar" id="vidbarf-${m.id}"></div></div>
+              <div class="preview-wrap ${m.video ? 'visible' : ''}" id="vidprev-${m.id}">
+                ${m.video ? `<video class="vid-preview" src="${m.video}" controls></video>` : ''}
+                <div class="preview-label"><span>${m.video ? m.video.split('/').pop() : ''}</span><button class="replace-btn">Replace ↑</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleCard(id) {
+  const card = document.getElementById('card-' + id);
+  card.classList.toggle('open');
+}
+
+async function createMapping() {
+  try {
+    const r = await fetch('/api/mappings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'New Mapping ' + (mappings.length + 1) })
+    });
+    const entry = await r.json();
+    mappings.unshift(entry);
+    render();
+    // Auto-open new card
+    setTimeout(() => {
+      document.getElementById('card-' + entry.id).classList.add('open');
+      document.getElementById('title-' + entry.id).focus();
+    }, 50);
+    toast('Mapping created', 'ok');
+  } catch(e) { toast('Failed to create', 'err'); }
+}
+
+async function saveMeta(id) {
+  const title = document.getElementById('title-' + id).value;
+  const qrContent = document.getElementById('qrc-' + id).value;
+  try {
+    await fetch('/api/mappings/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, qrContent })
+    });
+    const idx = mappings.findIndex(m => m.id === id);
+    if (idx > -1) { mappings[idx].title = title; mappings[idx].qrContent = qrContent; }
+    render(); toggleCard(id);
+    toast('Saved!', 'ok');
+  } catch(e) { toast('Save failed', 'err'); }
+}
+
+async function uploadFile(id, type, file) {
+  if (!file) return;
+  const isQr = type === 'qr';
+  const barWrap = document.getElementById((isQr ? 'qr' : 'vid') + 'bar-' + id);
+  const barFill = document.getElementById((isQr ? 'qr' : 'vid') + 'barf-' + id);
+  barWrap.classList.add('visible');
+  barFill.style.width = '10%';
+
+  const fd = new FormData();
+  fd.append(isQr ? 'qr' : 'video', file);
+
+  const xhr = new XMLHttpRequest();
+  xhr.upload.onprogress = e => {
+    if (e.lengthComputable) barFill.style.width = Math.round((e.loaded / e.total) * 90) + '%';
+  };
+  xhr.onload = () => {
+    barFill.style.width = '100%';
+    setTimeout(() => barWrap.classList.remove('visible'), 600);
+    if (xhr.status === 200) {
+      const updated = JSON.parse(xhr.responseText);
+      const idx = mappings.findIndex(m => m.id === id);
+      if (idx > -1) mappings[idx] = updated;
+      // Update preview inline
+      if (isQr) {
+        const pw = document.getElementById('qrprev-' + id);
+        pw.classList.add('visible');
+        pw.innerHTML = `<img class="qr-preview" src="${updated.qrImage}?t=${Date.now()}" /><div class="preview-label"><span>QR Image</span><button class="replace-btn">Replace ↑</button></div>`;
+        if (updated.qrContent) document.getElementById('qrc-' + id).value = updated.qrContent;
+      } else {
+        const pw = document.getElementById('vidprev-' + id);
+        pw.classList.add('visible');
+        pw.innerHTML = `<video class="vid-preview" src="${updated.video}" controls></video><div class="preview-label"><span>${file.name}</span><button class="replace-btn">Replace ↑</button></div>`;
+      }
+      // Refresh pills
+      const card = document.getElementById('card-' + id);
+      render(); 
+      card.classList.add('open');
+      toast((isQr ? 'QR image' : 'Video') + ' uploaded!', 'ok');
+    } else { toast('Upload failed', 'err'); }
+  };
+  xhr.onerror = () => toast('Network error', 'err');
+  xhr.open('POST', '/api/mappings/' + id + '/' + (isQr ? 'qr' : 'video'));
+  xhr.send(fd);
+}
+
+async function deleteMapping(id) {
+  if (!confirm('Delete this mapping and its files?')) return;
+  try {
+    await fetch('/api/mappings/' + id, { method: 'DELETE' });
+    mappings = mappings.filter(m => m.id !== id);
+    render();
+    toast('Deleted', 'ok');
+  } catch(e) { toast('Delete failed', 'err'); }
+}
+
+function dragover(e, id, type) { e.preventDefault(); document.getElementById((type==='qr'?'qr':'vid')+'zone-'+id).classList.add('drag'); }
+function dragleave(id, type) { document.getElementById((type==='qr'?'qr':'vid')+'zone-'+id).classList.remove('drag'); }
+function drop(e, id, type) { e.preventDefault(); dragleave(id,type); const f = e.dataTransfer.files[0]; if(f) uploadFile(id,type,f); }
+
+let toastTimer;
+function toast(msg, type='ok') {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast ' + type + ' show';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+load();
+</script>
+</body>
+</html>

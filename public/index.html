@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>AR Scanner</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html,body { width:100%; height:100%; overflow:hidden; background:#000; font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif; }
+
+.screen { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; transition:opacity 0.35s ease,transform 0.35s ease; }
+.screen.hidden { opacity:0; pointer-events:none; transform:scale(1.03); }
+
+/* SPLASH */
+#splash { background:#000; z-index:100; }
+.s-logo { width:88px; height:88px; border-radius:22px; background:linear-gradient(135deg,#00f0a0,#0055ff); display:flex; align-items:center; justify-content:center; margin-bottom:26px; box-shadow:0 0 60px rgba(0,240,160,.3); animation:zoomIn .7s cubic-bezier(.34,1.56,.64,1) both; }
+.s-logo svg { width:46px; height:46px; }
+.s-name { font-size:30px; font-weight:700; color:#fff; letter-spacing:-.5px; animation:fadeUp .6s .2s both; }
+.s-tag { font-size:14px; color:rgba(255,255,255,.4); margin-top:6px; animation:fadeUp .6s .35s both; }
+.s-bar { width:150px; height:3px; background:rgba(255,255,255,.1); border-radius:99px; margin-top:48px; overflow:hidden; animation:fadeUp .6s .5s both; }
+.s-fill { height:100%; background:linear-gradient(90deg,#00f0a0,#0055ff); border-radius:99px; animation:loadBar 2s .6s ease forwards; }
+
+/* SCANNER */
+#scanner { background:#000; z-index:10; }
+#video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+#canvas { display:none; }
+.scan-ui { position:absolute; inset:0; display:flex; flex-direction:column; pointer-events:none; }
+.scan-top { padding:52px 20px 16px; display:flex; align-items:center; justify-content:space-between; background:linear-gradient(to bottom,rgba(0,0,0,.75),transparent); pointer-events:all; }
+.scan-title { font-size:17px; font-weight:600; color:#fff; }
+.scan-bottom { margin-top:auto; padding:20px 20px 44px; background:linear-gradient(to top,rgba(0,0,0,.7),transparent); text-align:center; pointer-events:all; }
+.scan-hint { font-size:13px; color:rgba(255,255,255,.45); }
+.scan-count { font-size:12px; color:rgba(0,240,160,.7); margin-top:4px; }
+
+.vf { position:absolute; top:50%; left:50%; transform:translate(-50%,-58%); width:min(70vw,280px); height:min(70vw,280px); }
+.corner { position:absolute; width:26px; height:26px; }
+.corner::before,.corner::after { content:''; position:absolute; background:#00f0a0; border-radius:2px; }
+.corner::before { width:3px; height:100%; }
+.corner::after { width:100%; height:3px; }
+.corner.tl { top:0; left:0; }
+.corner.tr { top:0; right:0; transform:scaleX(-1); }
+.corner.bl { bottom:0; left:0; transform:scaleY(-1); }
+.corner.br { bottom:0; right:0; transform:scale(-1); }
+.scan-line { position:absolute; left:4px; right:4px; height:2px; background:linear-gradient(90deg,transparent,#00f0a0,transparent); border-radius:99px; animation:scanMove 2s ease-in-out infinite; box-shadow:0 0 10px #00f0a0; }
+.det-flash { position:absolute; inset:-4px; border-radius:8px; border:3px solid #00f0a0; opacity:0; transition:opacity .15s; box-shadow:0 0 24px rgba(0,240,160,.5); }
+.det-flash.on { opacity:1; }
+.det-badge { position:absolute; top:50%; left:50%; transform:translate(-50%,calc(-50% - min(37vw,158px) - 18px)); background:rgba(0,240,160,.12); border:1px solid rgba(0,240,160,.45); border-radius:99px; padding:5px 14px; font-size:13px; color:#00f0a0; font-weight:500; opacity:0; transition:opacity .2s; white-space:nowrap; backdrop-filter:blur(8px); }
+.det-badge.on { opacity:1; }
+
+.icon-btn { width:40px; height:40px; border-radius:50%; border:none; background:rgba(255,255,255,.1); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:background .15s; }
+.icon-btn:active { background:rgba(255,255,255,.2); }
+.icon-btn svg { width:18px; height:18px; fill:rgba(255,255,255,.8); }
+
+/* PLAYER */
+#player { background:#000; z-index:20; }
+#pvid { width:100%; height:100%; object-fit:contain; position:absolute; inset:0; }
+.ply-ov { position:absolute; inset:0; display:flex; flex-direction:column; transition:opacity .3s; }
+.ply-ov.hide { opacity:0; pointer-events:none; }
+.ply-top { padding:52px 18px 18px; display:flex; align-items:center; gap:12px; background:linear-gradient(to bottom,rgba(0,0,0,.85),transparent); }
+.ply-title { flex:1; font-size:16px; font-weight:600; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ply-bot { margin-top:auto; padding:16px 18px 40px; background:linear-gradient(to top,rgba(0,0,0,.9),transparent); }
+.prog-row { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+.ptime { font-size:12px; color:rgba(255,255,255,.55); min-width:34px; font-variant-numeric:tabular-nums; }
+.pbar { flex:1; height:3px; background:rgba(255,255,255,.2); border-radius:99px; cursor:pointer; position:relative; }
+.pfill { height:100%; background:#00f0a0; border-radius:99px; transition:width .1s linear; position:relative; }
+.pthumb { position:absolute; top:50%; right:-6px; transform:translateY(-50%); width:12px; height:12px; border-radius:50%; background:#00f0a0; }
+.ply-ctrls { display:flex; align-items:center; justify-content:space-between; }
+.mid-ctrls { display:flex; align-items:center; gap:28px; }
+.skip-btn { background:none; border:none; color:rgba(255,255,255,.65); font-size:11px; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:2px; }
+.skip-btn svg { width:22px; height:22px; fill:rgba(255,255,255,.65); }
+.big-play { width:62px; height:62px; border-radius:50%; border:none; background:rgba(255,255,255,.14); backdrop-filter:blur(10px); display:flex; align-items:center; justify-content:center; cursor:pointer; transition:background .15s,transform .1s; }
+.big-play:active { transform:scale(.9); }
+.big-play svg { width:28px; height:28px; fill:#fff; }
+.scan-again { padding:10px 20px; border-radius:99px; border:1.5px solid rgba(0,240,160,.55); background:transparent; color:#00f0a0; font-size:14px; font-weight:500; cursor:pointer; }
+.scan-again:active { background:rgba(0,240,160,.1); }
+
+/* tap zone */
+.tap-zone { position:absolute; inset:0; }
+
+@keyframes zoomIn { from{opacity:0;transform:scale(.5)} to{opacity:1;transform:scale(1)} }
+@keyframes fadeUp { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
+@keyframes loadBar { from{width:0} to{width:100%} }
+@keyframes scanMove { 0%,100%{top:4px;opacity:.5} 50%{top:calc(100% - 6px);opacity:1} }
+</style>
+</head>
+<body>
+
+<!-- SPLASH -->
+<div id="splash" class="screen">
+  <div class="s-logo">
+    <svg viewBox="0 0 46 46" fill="none"><rect x="3" y="3" width="15" height="15" rx="3" fill="white"/><rect x="28" y="3" width="15" height="15" rx="3" fill="white"/><rect x="3" y="28" width="15" height="15" rx="3" fill="white"/><rect x="30" y="30" width="8" height="8" rx="1.5" fill="white"/><rect x="28" y="28" width="6" height="6" rx="1" fill="white" opacity=".45"/></svg>
+  </div>
+  <div class="s-name">AR Scanner</div>
+  <div class="s-tag">Point · Scan · Watch</div>
+  <div class="s-bar"><div class="s-fill"></div></div>
+</div>
+
+<!-- SCANNER -->
+<div id="scanner" class="screen hidden">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
+  <div class="scan-ui">
+    <div class="scan-top">
+      <div class="scan-title">Scanner</div>
+      <a href="/admin" style="text-decoration:none">
+        <button class="icon-btn" title="Admin Panel">
+          <svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+        </button>
+      </a>
+    </div>
+    <div class="vf">
+      <div class="corner tl"></div><div class="corner tr"></div>
+      <div class="corner bl"></div><div class="corner br"></div>
+      <div class="scan-line"></div>
+      <div class="det-flash" id="flash"></div>
+    </div>
+    <div class="det-badge" id="badge">✓ Detected!</div>
+    <div class="scan-bottom">
+      <div class="scan-hint">Aim at a QR code to play video</div>
+      <div class="scan-count" id="scanCount"></div>
+    </div>
+  </div>
+</div>
+
+<!-- PLAYER -->
+<div id="player" class="screen hidden">
+  <video id="pvid" playsinline></video>
+  <div class="tap-zone" id="tapZone" onclick="tapOverlay()"></div>
+  <div class="ply-ov" id="plyOv">
+    <div class="ply-top">
+      <button class="icon-btn" onclick="closePlayer()">
+        <svg viewBox="0 0 24 24"><path d="M20 11H7.83l4.88-4.88c.39-.39.39-1.03 0-1.42-.39-.39-1.02-.39-1.41 0l-6.59 6.59c-.39.39-.39 1.02 0 1.41l6.59 6.59c.39.39 1.02.39 1.41 0 .39-.39.39-1.02 0-1.41L7.83 13H20c.55 0 1-.45 1-1s-.45-1-1-1z"/></svg>
+      </button>
+      <div class="ply-title" id="plyTitle">Now Playing</div>
+      <button class="icon-btn" id="sndBtn" onclick="toggleSound()">
+        <svg viewBox="0 0 24 24" id="sndIco"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+      </button>
+    </div>
+    <div style="flex:1"></div>
+    <div class="ply-bot">
+      <div class="prog-row">
+        <span class="ptime" id="curT">0:00</span>
+        <div class="pbar" id="pbar" onclick="seekClick(event)">
+          <div class="pfill" id="pfill" style="width:0%"><div class="pthumb"></div></div>
+        </div>
+        <span class="ptime" id="durT">0:00</span>
+      </div>
+      <div class="ply-ctrls">
+        <button class="scan-again" onclick="closePlayer()">← Scan Again</button>
+        <div class="mid-ctrls">
+          <button class="skip-btn" onclick="skip(-10)"><svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg><span>10s</span></button>
+          <button class="big-play" id="playBtn" onclick="togglePlay()">
+            <svg viewBox="0 0 24 24" id="playIco"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+          <button class="skip-btn" onclick="skip(10)"><svg viewBox="0 0 24 24"><path d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/></svg><span>10s</span></button>
+        </div>
+        <button class="icon-btn" onclick="toggleFullscreen()">
+          <svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+<script>
+let mappings = [];
+let scanning = false, cooldown = false, muted = false;
+let ovTimer = null;
+
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
+const pvid = document.getElementById('pvid');
+
+// Load mappings from server
+async function loadMappings() {
+  try {
+    const r = await fetch('/api/mappings');
+    mappings = await r.json();
+    document.getElementById('scanCount').textContent = mappings.length + ' target' + (mappings.length !== 1 ? 's' : '') + ' loaded';
+  } catch(e) { console.warn('Could not load mappings', e); }
+}
+
+// Splash → Scanner
+window.addEventListener('load', async () => {
+  await loadMappings();
+  setTimeout(() => { show('scanner'); startCamera(); }, 2500);
+});
+
+function show(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.toggle('hidden', s.id !== id));
+}
+
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    video.srcObject = stream;
+    video.onloadedmetadata = () => { scanning = true; requestAnimationFrame(scanFrame); };
+  } catch(e) { alert('Camera permission denied. Please allow camera access and reload.'); }
+}
+
+function scanFrame() {
+  if (!scanning) { requestAnimationFrame(scanFrame); return; }
+  if (video.readyState === video.HAVE_ENOUGH_DATA) {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
+    const d = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const code = jsQR(d.data, d.width, d.height, { inversionAttempts: 'dontInvert' });
+    if (code && !cooldown) handleDetected(code.data);
+  }
+  requestAnimationFrame(scanFrame);
+}
+
+function handleDetected(data) {
+  const match = mappings.find(m => m.qrContent && (data === m.qrContent || data.includes(m.qrContent) || m.qrContent.includes(data)));
+  if (!match || !match.video) return;
+  cooldown = true;
+  document.getElementById('flash').classList.add('on');
+  document.getElementById('badge').classList.add('on');
+  if (navigator.vibrate) navigator.vibrate([50, 20, 50]);
+  setTimeout(() => {
+    document.getElementById('flash').classList.remove('on');
+    document.getElementById('badge').classList.remove('on');
+    playVideo(match);
+  }, 300);
+}
+
+function playVideo(match) {
+  document.getElementById('plyTitle').textContent = match.title || 'Now Playing';
+  pvid.src = match.video;
+  pvid.muted = muted;
+  show('player');
+  pvid.play();
+  syncPlayIcon();
+  startOvTimer();
+}
+
+function closePlayer() {
+  pvid.pause(); pvid.src = '';
+  show('scanner');
+  setTimeout(() => { cooldown = false; }, 600);
+}
+
+function togglePlay() {
+  pvid.paused ? pvid.play() : pvid.pause();
+  syncPlayIcon(); startOvTimer();
+}
+
+function syncPlayIcon() {
+  document.getElementById('playIco').setAttribute('d',
+    pvid.paused ? 'M8 5v14l11-7z' : 'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
+}
+
+function skip(s) { pvid.currentTime = Math.max(0, Math.min(pvid.duration || 0, pvid.currentTime + s)); startOvTimer(); }
+
+function seekClick(e) {
+  const r = document.getElementById('pbar').getBoundingClientRect();
+  pvid.currentTime = ((e.clientX - r.left) / r.width) * (pvid.duration || 0);
+  startOvTimer();
+}
+
+function toggleSound() {
+  muted = !muted; pvid.muted = muted;
+  document.getElementById('sndIco').setAttribute('d', muted
+    ? 'M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z'
+    : 'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z');
+}
+
+function tapOverlay() {
+  const ov = document.getElementById('plyOv');
+  ov.classList.contains('hide') ? (ov.classList.remove('hide'), startOvTimer()) : ov.classList.add('hide');
+}
+
+function startOvTimer() {
+  const ov = document.getElementById('plyOv');
+  ov.classList.remove('hide');
+  clearTimeout(ovTimer);
+  if (!pvid.paused) ovTimer = setTimeout(() => ov.classList.add('hide'), 3200);
+}
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+  else document.exitFullscreen();
+}
+
+pvid.addEventListener('timeupdate', () => {
+  const c = pvid.currentTime, d = pvid.duration || 0;
+  document.getElementById('pfill').style.width = (d ? (c/d)*100 : 0) + '%';
+  document.getElementById('curT').textContent = fmt(c);
+  document.getElementById('durT').textContent = fmt(d);
+});
+pvid.addEventListener('ended', () => { syncPlayIcon(); document.getElementById('plyOv').classList.remove('hide'); });
+pvid.addEventListener('play', syncPlayIcon);
+pvid.addEventListener('pause', syncPlayIcon);
+
+function fmt(s) {
+  const m = Math.floor(s/60), sec = Math.floor(s%60);
+  return m + ':' + (sec < 10 ? '0' : '') + sec;
+}
+</script>
+</body>
+</html>
