@@ -181,7 +181,7 @@
 </div>
 <button class="debug-toggle" onclick="toggleDebug()">D</button>
 
-<script async src="https://docs.opencv.org/4.5.2/opencv.js"></script>
+<script async src="/opencv.js" onload="onOpenCvReady()"></script>
 <script>
 // States
 const STATES = { SCANNING: 'SCANNING', LOCKED: 'LOCKED', ENDED: 'ENDED' };
@@ -216,6 +216,69 @@ async function loadMappings() {
 function onOpenCvReady() {
   console.log('OpenCV.js is ready');
   document.getElementById('dbgCV').textContent = 'Ready';
+}
+
+async function preloadTargetImages() {
+  targetImages = [];
+  for (const m of mappings) {
+    if (m.targetImageUrl) {
+      try {
+        await new Promise(resolve => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = async () => {
+            const c = document.createElement('canvas');
+            c.width = img.width;
+            c.height = img.height;
+            const ctx = c.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            
+            // Pre-compute features once
+            const features = await computeFeatures(c);
+            if (features) {
+              targetImages.push({
+                id: m.id,
+                mapping: m,
+                features: features
+              });
+            }
+            resolve();
+          };
+          img.onerror = () => {
+            console.warn('Failed to load target image:', m.targetImageUrl);
+            resolve();
+          };
+          img.src = m.targetImageUrl;
+        });
+      } catch(e) {
+        console.warn('Error preloading target image:', e);
+      }
+    }
+  }
+}
+
+async function computeFeatures(canvas) {
+  try {
+    if (!cv) return null;
+    
+    const src = cv.imread(canvas);
+    const gray = new cv.Mat();
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    
+    // ORB detector with optimized parameters
+    const orb = new cv.ORB(1000, 1.2, 8); // More features for better matching
+    const kp = [];
+    const desc = new cv.Mat();
+    orb.detectAndCompute(gray, new cv.Mat(), kp, desc, false);
+    
+    src.delete();
+    gray.delete();
+    
+    return { keypoints: kp, descriptors: desc };
+  } catch(e) {
+    console.error('Error computing features:', e);
+    return null;
+  }
 }
 
 async function preloadTargetImages() {
