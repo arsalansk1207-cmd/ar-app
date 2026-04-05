@@ -75,6 +75,14 @@
   @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
   @keyframes loadBar{from{width:0}to{width:100%}}
   @keyframes scanLine{0%,100%{top:4px;opacity:0.5}50%{top:calc(100% - 6px);opacity:1}}
+
+  /* DEBUG PANEL */
+  .debug-panel{position:fixed;bottom:24px;left:24px;background:rgba(0,0,0,0.85);border:1px solid rgba(0,240,160,0.3);border-radius:8px;padding:12px;font-size:11px;color:#00f0a0;font-family:monospace;max-width:280px;z-index:50;max-height:200px;overflow-y:auto;display:block}
+  .debug-panel.hidden{display:none}
+  .debug-label{font-weight:bold;margin-top:6px;margin-bottom:2px}
+  .debug-value{color:rgba(255,255,255,0.6);word-break:break-all}
+  .debug-toggle{position:fixed;bottom:24px;right:24px;width:40px;height:40px;border-radius:50%;background:#00f0a0;color:#000;border:none;cursor:pointer;font-weight:bold;z-index:51;font-size:20px;display:flex;align-items:center;justify-content:center}
+
 </style>
 </head>
 <body>
@@ -158,14 +166,32 @@
   </div>
 </div>
 
+<div class="debug-panel hidden" id="debugPanel">
+  <div class="debug-label">Detection Stats</div>
+  <div class="debug-label">State:</div>
+  <div class="debug-value" id="dbgState">SCANNING</div>
+  <div class="debug-label">Targets:</div>
+  <div class="debug-value" id="dbgTargets">0</div>
+  <div class="debug-label">Last Match:</div>
+  <div class="debug-value" id="dbgMatch">None</div>
+  <div class="debug-label">Match Count:</div>
+  <div class="debug-value" id="dbgMatchCount">0</div>
+  <div class="debug-label">CV.js:</div>
+  <div class="debug-value" id="dbgCV">Loading...</div>
+</div>
+<button class="debug-toggle" onclick="toggleDebug()">D</button>
+
 <script async src="https://docs.opencv.org/4.5.2/opencv.js"></script>
 <script>
+// States
+const STATES = { SCANNING: 'SCANNING', LOCKED: 'LOCKED', ENDED: 'ENDED' };
+let state = STATES.SCANNING;
+
 let mappings = [];
-let scanning = false;
-let cooldown = false;
 let muted = false;
 let overlayTimer = null;
-let targetImages = []; // Cached target image data
+let targetImages = []; // Pre-computed target image features
+let scanInterval = null;
 
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
@@ -176,9 +202,20 @@ async function loadMappings() {
   try {
     const res = await fetch('/api/scanner-mappings');
     mappings = await res.json();
-    // Preload target images for faster matching
+    // Preload and pre-compute target image features
     await preloadTargetImages();
-  } catch(e) { mappings = []; }
+    console.log(`Loaded ${targetImages.length} target images for matching`);
+    document.getElementById('dbgTargets').textContent = targetImages.length + ' loaded';
+  } catch(e) { 
+    console.error('Failed to load mappings:', e);
+    mappings = []; 
+  }
+}
+
+// Wait for OpenCV to load
+function onOpenCvReady() {
+  console.log('OpenCV.js is ready');
+  document.getElementById('dbgCV').textContent = 'Ready';
 }
 
 async function preloadTargetImages() {
@@ -186,34 +223,62 @@ async function preloadTargetImages() {
   for (const m of mappings) {
     if (m.targetImageUrl) {
       try {
-        const img = await loadImageAsCanvas(m.targetImageUrl);
-        targetImages.push({
-          id: m.id,
-          canvas: img,
-          mapping: m
+        await new Promise(resolve => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = async () => {
+            const c = document.createElement('canvas');
+            c.width = img.width;
+            c.height = img.height;
+            const ctx = c.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            
+            // Pre-compute features once
+            const features = await computeFeatures(c);
+            if (features) {
+              targetImages.push({
+                id: m.id,
+                mapping: m,
+                features: features
+              });
+            }
+            resolve();
+          };
+          img.onerror = () => {
+            console.warn('Failed to load target image:', m.targetImageUrl);
+            resolve();
+          };
+          img.src = m.targetImageUrl;
         });
       } catch(e) {
-        console.warn('Failed to load target image:', m.targetImageUrl);
+        console.warn('Error preloading target image:', e);
       }
     }
   }
 }
 
-async function loadImageAsCanvas(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = () => {
-      const c = document.createElement('canvas');
-      c.width = img.width;
-      c.height = img.height;
-      const ctx = c.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      resolve(c);
-    };
-    img.onerror = reject;
-    img.src = url;
-  });
+async function computeFeatures(canvas) {
+  try {
+    if (!cv) return null;
+    
+    const src = cv.imread(canvas);
+    const gray = new cv.Mat();
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    
+    // ORB detector with optimized parameters
+    const orb = new cv.ORB(1000, 1.2, 8); // More features for better matching
+    const kp = [];
+    const desc = new cv.Mat();
+    orb.detectAndCompute(gray, new cv.Mat(), kp, desc, false);
+    
+    src.delete();
+    gray.delete();
+    
+    return { keypoints: kp, descriptors: desc };
+  } catch(e) {
+    console.error('Error computing features:', e);
+    return null;
+  }
 }
 
 window.addEventListener('load', async () => {
@@ -231,118 +296,173 @@ async function startCamera() {
       video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
     });
     video.srcObject = stream;
-    video.onloadedmetadata = () => { scanning = true; requestAnimationFrame(scanFrame); };
+    video.onloadedmetadata = () => { 
+      state = STATES.SCANNING;
+      startScanning(); 
+    };
   } catch(e) {
     alert('Camera access is required. Please allow camera access and reload.');
   }
 }
 
-function scanFrame() {
-  if (!scanning || !cv || targetImages.length === 0) {
-    requestAnimationFrame(scanFrame);
+function startScanning() {
+  if (scanInterval) clearInterval(scanInterval);
+  // Scan every 400ms for better performance
+  scanInterval = setInterval(detectFrame, 400);
+}
+
+function stopScanning() {
+  if (scanInterval) {
+    clearInterval(scanInterval);
+    scanInterval = null;
+  }
+}
+
+function detectFrame() {
+  if (state !== STATES.SCANNING || !cv || targetImages.length === 0 || video.readyState !== video.HAVE_ENOUGH_DATA) {
     return;
   }
   
-  if (video.readyState === video.HAVE_ENOUGH_DATA) {
+  try {
+    // Capture current frame
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     ctx.drawImage(video, 0, 0);
     
-    // Convert canvas to OpenCV Mat
+    // Compute frame features once
     const src = cv.imread(canvas);
     const gray = new cv.Mat();
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
     
-    // Detect features using ORB
-    const orb = new cv.ORB(500, 1.2, 8);
+    const orb = new cv.ORB(1000, 1.2, 8);
     const kp = [];
     const desc = new cv.Mat();
     orb.detectAndCompute(gray, new cv.Mat(), kp, desc, false);
     
-    if (kp.length > 50 && !cooldown) { // Need enough features to match
-      // Try to match against each target image
-      let bestMatch = null;
-      let bestScore = 0;
+    // Try matching against each target
+    let bestMatch = null;
+    let bestMatchCount = 0;
+    
+    for (const target of targetImages) {
+      if (!target.features || target.features.descriptors.rows === 0 || desc.rows === 0) continue;
       
-      for (const target of targetImages) {
-        const targetGray = new cv.Mat();
-        cv.cvtColor(cv.imread(target.canvas), targetGray, cv.COLOR_RGBA2GRAY);
+      try {
+        // Use KNN matcher for better accuracy (8+ good matches threshold)
+        const bf = new cv.BFMatcher(cv.NORM_HAMMING, false);
+        const knnMatches = bf.knnMatch(desc, target.features.descriptors, 2);
         
-        const targetKp = [];
-        const targetDesc = new cv.Mat();
-        orb.detectAndCompute(targetGray, new cv.Mat(), targetKp, targetDesc, false);
-        
-        if (targetKp.length > 50 && targetDesc.rows > 0 && desc.rows > 0) {
-          const bf = new cv.BFMatcher(cv.NORM_HAMMING, true);
-          const matches = bf.match(desc, targetDesc);
-          
-          // Score based on match count
-          const score = matches.length / Math.max(kp.length, targetKp.length);
-          
-          if (score > 0.15 && score > bestScore) { // threshold: 15% of features match
-            bestScore = score;
-            bestMatch = target;
+        // Apply Lowe's ratio test
+        const goodMatches = [];
+        for (let i = 0; i < knnMatches.length; i++) {
+          const dmatch = knnMatches[i];
+          if (dmatch.length === 2) {
+            const [m, n] = dmatch;
+            // Lowe's ratio test - ratio should be < 0.7
+            if (m.distance < 0.7 * n.distance) {
+              goodMatches.push(m);
+            }
           }
-          
-          targetGray.delete();
-          targetDesc.delete();
         }
-      }
-      
-      if (bestMatch) {
-        handleDetected(bestMatch.mapping);
+        
+        // Check if this is best match (threshold: 8+ good matches)
+        if (goodMatches.length > bestMatchCount) {
+          bestMatchCount = goodMatches.length;
+          bestMatch = target;
+        }
+      } catch(e) {
+        console.warn('Matching error:', e);
       }
     }
     
+    // Update debug panel
+    document.getElementById('dbgMatchCount').textContent = bestMatchCount;
+    if (bestMatch) {
+      document.getElementById('dbgMatch').textContent = bestMatch.mapping.title;
+    }
+    
+    // Trigger if we have enough matches
+    if (bestMatchCount >= 8 && bestMatch) {
+      handleDetected(bestMatch.mapping);
+    }
+    
+    // Cleanup
     src.delete();
     gray.delete();
     desc.delete();
+    
+  } catch(e) {
+    console.error('Frame detection error:', e);
   }
-  
-  requestAnimationFrame(scanFrame);
 }
 
-function handleDetected(match) {
-  if (!match) return;
-  cooldown = true;
+function handleDetected(mapping) {
+  if (state !== STATES.SCANNING) return;
+  
+  state = STATES.LOCKED;
+  stopScanning();
+  
+  // Visual feedback
   document.getElementById('detectedFlash').classList.add('active');
   document.getElementById('scanBadge').classList.add('active');
-  if (navigator.vibrate) navigator.vibrate([60,30,60]);
+  if (navigator.vibrate) navigator.vibrate([60, 30, 60]);
+  
   setTimeout(() => {
     document.getElementById('detectedFlash').classList.remove('active');
     document.getElementById('scanBadge').classList.remove('active');
-    playVideo(match);
+    playVideo(mapping);
   }, 320);
 }
 
-function playVideo(match) {
-  document.getElementById('videoTitle').textContent = match.title || 'Now Playing';
-  playerVideo.src = match.videoUrl;
+function playVideo(mapping) {
+  document.getElementById('videoTitle').textContent = mapping.title || 'Now Playing';
+  playerVideo.src = mapping.videoUrl;
   playerVideo.muted = muted;
   show('player');
+  
+  // Pause video track to improve performance
+  video.srcObject.getTracks().forEach(track => track.enabled = false);
+  
   playerVideo.play();
   updatePlayIcon();
   startOverlayTimer();
-  // refresh mappings in background
+  
+  // When video ends, go back to scanning
+  playerVideo.onended = () => {
+    closePlayer();
+  };
+  
+  // Refresh mappings in background
   loadMappings();
 }
 
 function closePlayer() {
   playerVideo.pause();
   playerVideo.src = '';
+  
+  // Resume video track
+  if (video.srcObject) {
+    video.srcObject.getTracks().forEach(track => track.enabled = true);
+  }
+  
   show('scanner');
-  cooldown = false;
+  state = STATES.SCANNING;
+  startScanning();
 }
 
 function togglePlay() {
   playerVideo.paused ? playerVideo.play() : playerVideo.pause();
-  updatePlayIcon(); startOverlayTimer();
+  updatePlayIcon(); 
+  startOverlayTimer();
 }
 
 function togglePlayUI() {
   const ov = document.getElementById('playerOverlay');
-  if (ov.classList.contains('hide')) { ov.classList.remove('hide'); startOverlayTimer(); }
-  else ov.classList.add('hide');
+  if (ov.classList.contains('hide')) { 
+    ov.classList.remove('hide'); 
+    startOverlayTimer(); 
+  } else {
+    ov.classList.add('hide');
+  }
 }
 
 function updatePlayIcon() {
@@ -350,7 +470,11 @@ function updatePlayIcon() {
     playerVideo.paused ? 'M8 5v14l11-7z' : 'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
 }
 
-function seekBy(s) { playerVideo.currentTime = Math.max(0, Math.min(playerVideo.duration||0, playerVideo.currentTime+s)); startOverlayTimer(); }
+function seekBy(s) { 
+  playerVideo.currentTime = Math.max(0, Math.min(playerVideo.duration||0, playerVideo.currentTime+s)); 
+  startOverlayTimer(); 
+}
+
 function seekVideo(e) {
   const b = document.getElementById('progressBar').getBoundingClientRect();
   playerVideo.currentTime = ((e.clientX - b.left) / b.width) * (playerVideo.duration||0);
@@ -358,7 +482,8 @@ function seekVideo(e) {
 }
 
 function toggleSound() {
-  muted = !muted; playerVideo.muted = muted;
+  muted = !muted; 
+  playerVideo.muted = muted;
   document.getElementById('soundIcon').setAttribute('d', muted
     ? 'M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z'
     : 'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z');
@@ -368,7 +493,9 @@ function startOverlayTimer() {
   const ov = document.getElementById('playerOverlay');
   ov.classList.remove('hide');
   clearTimeout(overlayTimer);
-  overlayTimer = setTimeout(() => { if (!playerVideo.paused) ov.classList.add('hide'); }, 3000);
+  overlayTimer = setTimeout(() => { 
+    if (!playerVideo.paused) ov.classList.add('hide'); 
+  }, 3000);
 }
 
 playerVideo.addEventListener('timeupdate', () => {
@@ -377,11 +504,32 @@ playerVideo.addEventListener('timeupdate', () => {
   document.getElementById('curTime').textContent = fmt(c);
   document.getElementById('durTime').textContent = fmt(d);
 });
-playerVideo.addEventListener('ended', () => { updatePlayIcon(); document.getElementById('playerOverlay').classList.remove('hide'); });
+
+playerVideo.addEventListener('ended', () => { 
+  updatePlayIcon(); 
+  document.getElementById('playerOverlay').classList.remove('hide'); 
+});
+
 playerVideo.addEventListener('play', updatePlayIcon);
 playerVideo.addEventListener('pause', updatePlayIcon);
 
-function fmt(s) { const m=Math.floor(s/60),sec=Math.floor(s%60); return m+':'+(sec<10?'0':'')+sec; }
+function fmt(s) { 
+  const m = Math.floor(s/60), sec = Math.floor(s%60); 
+  return m + ':' + (sec<10?'0':'') + sec; 
+}
+
+function toggleDebug() {
+  const panel = document.getElementById('debugPanel');
+  panel.classList.toggle('hidden');
+  const state_text = panel.classList.contains('hidden') ? 'OFF' : 'ON';
+  console.log('Debug panel:', state_text);
+}
+
+// Update state in debug panel
+setInterval(() => {
+  document.getElementById('dbgState').textContent = state;
+}, 100);
+
 </script>
 </body>
 </html>
