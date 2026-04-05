@@ -43,26 +43,25 @@ router.get('/mappings', (req, res) => {
 });
 
 router.post('/upload', upload.fields([
-  { name: 'qrimage', maxCount: 1 },
+  { name: 'targetimage', maxCount: 1 },
   { name: 'video', maxCount: 1 }
 ]), (req, res) => {
   try {
-    const { title, qrtext } = req.body;
-    const qrFile = req.files['qrimage'] ? req.files['qrimage'][0] : null;
+    const { title } = req.body;
+    const targetFile = req.files['targetimage'] ? req.files['targetimage'][0] : null;
     const videoFile = req.files['video'] ? req.files['video'][0] : null;
 
     if (!videoFile) return res.status(400).json({ error: 'Video file is required' });
-    if (!qrFile && !qrtext) return res.status(400).json({ error: 'QR image or QR text content is required' });
+    if (!targetFile) return res.status(400).json({ error: 'Target image file is required' });
 
     const mappings = getMappings();
     const entry = {
       id: uuidv4(),
       title: title || 'Untitled',
-      qrImageUrl: qrFile ? '/uploads/qrcodes/' + qrFile.filename : null,
-      qrtext: qrtext || null,
+      targetImageUrl: '/uploads/qrcodes/' + targetFile.filename,
       videoUrl: '/uploads/videos/' + videoFile.filename,
       videoName: videoFile.originalname,
-      qrImageName: qrFile ? qrFile.originalname : null,
+      targetImageName: targetFile.originalname,
       createdAt: new Date().toISOString()
     };
 
@@ -94,8 +93,7 @@ router.get('/scanner-mappings', (req, res) => {
   res.json(mappings.map(m => ({
     id: m.id,
     title: m.title,
-    qrtext: m.qrtext,
-    qrImageUrl: m.qrImageUrl,
+    targetImageUrl: m.targetImageUrl,
     videoUrl: m.videoUrl
   })));
 });
