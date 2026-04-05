@@ -83,6 +83,15 @@
   .debug-value{color:rgba(255,255,255,0.6);word-break:break-all}
   .debug-toggle{position:fixed;bottom:24px;right:24px;width:40px;height:40px;border-radius:50%;background:#00f0a0;color:#000;border:none;cursor:pointer;font-weight:bold;z-index:51;font-size:20px;display:flex;align-items:center;justify-content:center}
 
+  /* SOUND PROMPT */
+  .sound-prompt{position:fixed;inset:0;background:rgba(0,0,0,0.8);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;z-index:60;transition:opacity 0.3s}
+  .sound-prompt.hidden{opacity:0;pointer-events:none}
+  .sound-prompt-content{background:#1a1a1a;border:1px solid rgba(0,240,160,0.3);border-radius:16px;padding:24px;text-align:center;max-width:280px}
+  .sound-icon{font-size:48px;margin-bottom:16px}
+  .sound-text{color:#fff;font-size:16px;font-weight:500;margin-bottom:20px}
+  .sound-unlock-btn{background:linear-gradient(135deg,#00f0a0,#0080ff);color:#000;border:none;border-radius:12px;padding:12px 24px;font-size:16px;font-weight:600;cursor:pointer;width:100%;transition:opacity 0.15s}
+  .sound-unlock-btn:hover{opacity:0.9}
+
 </style>
 </head>
 <body>
@@ -181,6 +190,15 @@
 </div>
 <button class="debug-toggle" onclick="toggleDebug()">D</button>
 
+<!-- SOUND UNLOCK PROMPT -->
+<div class="sound-prompt hidden" id="soundPrompt">
+  <div class="sound-prompt-content">
+    <div class="sound-icon">🔊</div>
+    <div class="sound-text">Tap to enable sound</div>
+    <button class="sound-unlock-btn" id="soundUnlockBtn">Enable Sound</button>
+  </div>
+</div>
+
 <script async src="/opencv.js" onload="onOpenCvReady()"></script>
 <script>
 // States
@@ -192,11 +210,35 @@ let muted = false;
 let overlayTimer = null;
 let targetImages = []; // Pre-computed target image features
 let scanInterval = null;
+let soundUnlocked = false;
 
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d', { willReadFrequently: true });
 const playerVideo = document.getElementById('player-video');
+
+// Detection configuration
+const DETECT_CONFIG = {
+  INTERVAL_MS: 400,
+  ORB_FEATURES: 1000, // Increased from 1000 to match advanced engine
+  MIN_MATCHES: 8,
+  PROC_WIDTH: 320,
+};
+
+/* CAMERA PAUSE / RESUME FOR SMOOTH VIDEO PLAYBACK */
+function pauseCameraFeed() {
+  if (!video?.srcObject) return;
+  const stream = video.srcObject;
+  stream.getVideoTracks().forEach(track => track.enabled = false);
+  console.log('[AR] Camera paused for smooth video playback');
+}
+
+function resumeCameraFeed() {
+  if (!video?.srcObject) return;
+  const stream = video.srcObject;
+  stream.getVideoTracks().forEach(track => track.enabled = true);
+  console.log('[AR] Camera resumed');
+}
 
 async function loadMappings() {
   try {
@@ -265,8 +307,8 @@ async function computeFeatures(canvas) {
     const gray = new cv.Mat();
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
     
-    // ORB detector with optimized parameters
-    const orb = new cv.ORB(1000, 1.2, 8); // More features for better matching
+    // ORB detector with optimized parameters for better detection
+    const orb = new cv.ORB(DETECT_CONFIG.ORB_FEATURES, 1.2, 8);
     const kp = [];
     const desc = new cv.Mat();
     orb.detectAndCompute(gray, new cv.Mat(), kp, desc, false);
@@ -320,32 +362,12 @@ async function preloadTargetImages() {
   }
 }
 
-async function computeFeatures(canvas) {
-  try {
-    if (!cv) return null;
-    
-    const src = cv.imread(canvas);
-    const gray = new cv.Mat();
-    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-    
-    // ORB detector with optimized parameters
-    const orb = new cv.ORB(1000, 1.2, 8); // More features for better matching
-    const kp = [];
-    const desc = new cv.Mat();
-    orb.detectAndCompute(gray, new cv.Mat(), kp, desc, false);
-    
-    src.delete();
-    gray.delete();
-    
-    return { keypoints: kp, descriptors: desc };
-  } catch(e) {
-    console.error('Error computing features:', e);
-    return null;
-  }
-}
-
 window.addEventListener('load', async () => {
   await loadMappings();
+  
+  // Add sound unlock event listener
+  document.getElementById('soundUnlockBtn').addEventListener('click', unlockSound);
+  
   setTimeout(() => { show('scanner'); startCamera(); }, 2400);
 });
 
@@ -371,7 +393,7 @@ async function startCamera() {
 function startScanning() {
   if (scanInterval) clearInterval(scanInterval);
   // Scan every 400ms for better performance
-  scanInterval = setInterval(detectFrame, 400);
+  scanInterval = setInterval(detectFrame, DETECT_CONFIG.INTERVAL_MS);
 }
 
 function stopScanning() {
@@ -397,7 +419,7 @@ function detectFrame() {
     const gray = new cv.Mat();
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
     
-    const orb = new cv.ORB(1000, 1.2, 8);
+    const orb = new cv.ORB(DETECT_CONFIG.ORB_FEATURES, 1.2, 8);
     const kp = [];
     const desc = new cv.Mat();
     orb.detectAndCompute(gray, new cv.Mat(), kp, desc, false);
@@ -414,14 +436,14 @@ function detectFrame() {
         const bf = new cv.BFMatcher(cv.NORM_HAMMING, false);
         const knnMatches = bf.knnMatch(desc, target.features.descriptors, 2);
         
-        // Apply Lowe's ratio test
+        // Apply Lowe's ratio test with improved threshold
         const goodMatches = [];
         for (let i = 0; i < knnMatches.length; i++) {
           const dmatch = knnMatches[i];
           if (dmatch.length === 2) {
             const [m, n] = dmatch;
-            // Lowe's ratio test - ratio should be < 0.7
-            if (m.distance < 0.7 * n.distance) {
+            // Lowe's ratio test - ratio should be < 0.75 for better accuracy
+            if (m.distance < 0.75 * n.distance) {
               goodMatches.push(m);
             }
           }
@@ -441,10 +463,13 @@ function detectFrame() {
     document.getElementById('dbgMatchCount').textContent = bestMatchCount;
     if (bestMatch) {
       document.getElementById('dbgMatch').textContent = bestMatch.mapping.title;
+    } else {
+      document.getElementById('dbgMatch').textContent = 'None';
     }
     
-    // Trigger if we have enough matches
-    if (bestMatchCount >= 8 && bestMatch) {
+    // Trigger if we have enough matches (increased threshold for better accuracy)
+    if (bestMatchCount >= DETECT_CONFIG.MIN_MATCHES && bestMatch) {
+      console.log(`[AR] Detected ${bestMatch.mapping.title} with ${bestMatchCount} matches`);
       handleDetected(bestMatch.mapping);
     }
     
@@ -472,6 +497,9 @@ function handleDetected(mapping) {
   setTimeout(() => {
     document.getElementById('detectedFlash').classList.remove('active');
     document.getElementById('scanBadge').classList.remove('active');
+    
+    // Pause camera for smooth video playback
+    pauseCameraFeed();
     playVideo(mapping);
   }, 320);
 }
@@ -479,13 +507,15 @@ function handleDetected(mapping) {
 function playVideo(mapping) {
   document.getElementById('videoTitle').textContent = mapping.title || 'Now Playing';
   playerVideo.src = mapping.videoUrl;
-  playerVideo.muted = muted;
+  playerVideo.muted = !soundUnlocked; // Use sound unlock state
   show('player');
   
-  // Pause video track to improve performance
-  video.srcObject.getTracks().forEach(track => track.enabled = false);
+  // Pause video track to improve performance (already done in handleDetected)
   
-  playerVideo.play();
+  playerVideo.play().catch(err => {
+    console.warn('[AR] Autoplay blocked:', err);
+    showSoundPrompt();
+  });
   updatePlayIcon();
   startOverlayTimer();
   
@@ -502,10 +532,8 @@ function closePlayer() {
   playerVideo.pause();
   playerVideo.src = '';
   
-  // Resume video track
-  if (video.srcObject) {
-    video.srcObject.getTracks().forEach(track => track.enabled = true);
-  }
+  // Resume camera feed
+  resumeCameraFeed();
   
   show('scanner');
   state = STATES.SCANNING;
@@ -576,9 +604,17 @@ playerVideo.addEventListener('ended', () => {
 playerVideo.addEventListener('play', updatePlayIcon);
 playerVideo.addEventListener('pause', updatePlayIcon);
 
-function fmt(s) { 
-  const m = Math.floor(s/60), sec = Math.floor(s%60); 
-  return m + ':' + (sec<10?'0':'') + sec; 
+function showSoundPrompt() {
+  const prompt = document.getElementById('soundPrompt');
+  prompt.classList.remove('hidden');
+  setTimeout(() => prompt.classList.add('hidden'), 5000);
+}
+
+function unlockSound() {
+  soundUnlocked = true;
+  playerVideo.muted = false;
+  playerVideo.volume = 1.0;
+  document.getElementById('soundPrompt').classList.add('hidden');
 }
 
 function toggleDebug() {
